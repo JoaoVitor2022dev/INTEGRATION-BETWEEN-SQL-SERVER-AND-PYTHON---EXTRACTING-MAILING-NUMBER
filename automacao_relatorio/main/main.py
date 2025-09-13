@@ -9,6 +9,7 @@ import pandas as pd # Biblioteca para manipular dados em DataFrame
 from dotenv import load_dotenv # Biblioteca para ler arquivo .env
 import os            # Para acessar variáveis de ambiente
 
+
 # -----------------------------
 # 1) Carregar variáveis do .env
 # -----------------------------
@@ -17,6 +18,15 @@ server = os.getenv("DB_SERVER")      # Nome do servidor SQL
 database = os.getenv("DB_DATABASE")  # Nome do banco de dados
 user = os.getenv("DB_USER")          # Usuário SQL (se usar SQL Authentication)
 password = os.getenv("DB_PASSWORD")  # Senha SQL (se usar SQL Authentication)
+
+
+# -----------------------------
+# 1) Pasta de destino
+# -----------------------------
+pasta_destino = "automacao_relatorio\REPORT_WITH_WHATSAPP"
+if not os.path.exists(pasta_destino):
+    os.makedirs(pasta_destino)  # cria a pasta se não existir
+
 
 # -----------------------------
 # 2) Conexão com SQL Server
@@ -58,14 +68,16 @@ df = pd.read_sql(query, conn)
 # -----------------------------
 # 5) Salvar os dados em CSV
 # -----------------------------
-df.to_csv("dados_clientes.csv", index=False, encoding="utf-8-sig")
+caminho_csv = os.path.join(pasta_destino, "dados_clientes.csv")
+df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
 # index=False -> não salva o índice do DataFrame
 # encoding="utf-8-sig" -> compatível com Excel, mantém acentos
 
 # -----------------------------
 # 6) Salvar os dados em Excel
 # -----------------------------
-df.to_excel("dados_clientes.xlsx", index=False)
+caminho_csv = os.path.join(pasta_destino, "dados_clientes.xlsx")
+df.to_excel(caminho_csv, index=False)
 # Salva os dados também em Excel, útil para abrir diretamente no programa
 
 # -----------------------------
