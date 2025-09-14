@@ -1,37 +1,39 @@
 # ====================================================
-# Projeto: Exportar dados do SQL Server para CSV/Excel
+# Exportar dados do SQL Server para Excel + Validação CNAM
 # Autor: João Mocambite
-# Objetivo: Aprender Python + SQL + pandas
+# Objetivo: 
+#   1) Conectar ao banco SQL Server e buscar dados de clientes
+#   2) Exportar todos os registros para Excel
+#   3) Validar até 100 números de telefone usando a API freecnam.org
+#   4) Exportar os resultados da validação para outra planilha Excel
 # ====================================================
 
-import pyodbc       # Biblioteca para conectar ao SQL Server
-import pandas as pd # Biblioteca para manipular dados em DataFrame
-from dotenv import load_dotenv # Biblioteca para ler arquivo .env
-import os            # Para acessar variáveis de ambiente
-
+# Bibliotecas necessárias
+import pyodbc          # Conexão com SQL Server
+import pandas as pd    # Manipulação de dados (DataFrame)
+from dotenv import load_dotenv  # Carregar variáveis de ambiente (.env)
+import os              # Manipular pastas e caminhos
+import requests        # Fazer requisições HTTP (chamada na API freecnam)
+import time            # Usado para dar pausas entre chamadas da API
 
 # -----------------------------
-# 1) Carregar variáveis do .env
+# 1) Carregar variáveis do arquivo .env
 # -----------------------------
-load_dotenv()  # Lê o arquivo .env e carrega as variáveis
+# O arquivo .env guarda informações sensíveis (como servidor e banco de dados)
+load_dotenv()
 server = os.getenv("DB_SERVER")      # Nome do servidor SQL
 database = os.getenv("DB_DATABASE")  # Nome do banco de dados
-user = os.getenv("DB_USER")          # Usuário SQL (se usar SQL Authentication)
-password = os.getenv("DB_PASSWORD")  # Senha SQL (se usar SQL Authentication)
-
 
 # -----------------------------
-# 1) Pasta de destino
+# 2) Definir pasta onde os relatórios serão salvos
 # -----------------------------
-pasta_destino = "automacao_relatorio\REPORT_WITH_WHATSAPP"
-if not os.path.exists(pasta_destino):
-    os.makedirs(pasta_destino)  # cria a pasta se não existir
-
+pasta_destino = "automacao_relatorio\\Report_number_whatsapp"
+os.makedirs(pasta_destino, exist_ok=True)  # Cria a pasta caso não exista
 
 # -----------------------------
-# 2) Conexão com SQL Server
+# 3) Conectar ao SQL Server
 # -----------------------------
-# Usando autenticação do Windows (Trusted Connection)
+# Aqui usamos autenticação do Windows (Trusted_Connection=yes)
 conn = pyodbc.connect(
     f"DRIVER={{ODBC Driver 17 for SQL Server}};"
     f"SERVER={server};"
@@ -39,54 +41,70 @@ conn = pyodbc.connect(
     "Trusted_Connection=yes;"
 )
 
-# Se quiser usar SQL Authentication, use essa linha em vez da acima:
-# conn = pyodbc.connect(
-#     f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-#     f"SERVER={server};"
-#     f"DATABASE={database};"
-#     f"UID={user};PWD={password}"
-# )
-
 # -----------------------------
-# 3) Consulta SQL
+# 4) Criar a consulta SQL
 # -----------------------------
+# DISTINCT([Pessoa_Cpf]) -> remove CPFs duplicados
 query = """
 SELECT DISTINCT([Pessoa_Cpf]), [Telefone_Celular]
 FROM [CAMCAP_LEBES].[dbo].[CAMCAP_LEBES_CDC]
 """
-# SELECT DISTINCT -> retorna apenas valores únicos
-# [Pessoa_Cpf], [Telefone_Celular] -> colunas que queremos
-# [CAMCAP_LEBES].[dbo].[CAMCAP_LEBES_CDC] -> tabela completa com schema dbo
 
 # -----------------------------
-# 4) Ler dados da tabela
+# 5) Ler dados da consulta para um DataFrame (pandas)
 # -----------------------------
 df = pd.read_sql(query, conn)
-# pd.read_sql -> executa a query e retorna um DataFrame do pandas
-# DataFrame é uma tabela em memória fácil de manipular
 
 # -----------------------------
-# 5) Salvar os dados em CSV
+# 6) Limpar registros inválidos (sem número)
 # -----------------------------
-caminho_csv = os.path.join(pasta_destino, "dados_clientes.csv")
-df.to_csv(caminho_csv, index=False, encoding="utf-8-sig")
-# index=False -> não salva o índice do DataFrame
-# encoding="utf-8-sig" -> compatível com Excel, mantém acentos
+df = df[df["Telefone_Celular"].notna()]  # remove valores nulos
+df = df[df["Telefone_Celular"].astype(str).str.strip() != ""]  # remove strings vazias
 
 # -----------------------------
-# 6) Salvar os dados em Excel
+# 7) Validar até 100 números de telefone com a API freecnam.org
 # -----------------------------
-caminho_csv = os.path.join(pasta_destino, "dados_clientes.xlsx")
-df.to_excel(caminho_csv, index=False)
-# Salva os dados também em Excel, útil para abrir diretamente no programa
+resultados = []
+numeros_validar = df["Telefone_Celular"].head(100)  # pega só os 100 primeiros números
+
+for numero in numeros_validar:
+    try:
+        url = f"https://freecnam.org/dip?q={numero}"
+        r = requests.get(url, timeout=5)  # timeout=5 segundos para não travar
+        if r.status_code == 200:
+            resultados.append(r.text.strip())  # resposta da API
+        else:
+            resultados.append("Erro API")      # caso a API não responda corretamente
+    except:
+        resultados.append("Erro conexão")      # erro de internet ou outro
+    time.sleep(1)  # pausa de 1s para não sobrecarregar a API gratuita
 
 # -----------------------------
-# 7) Mensagem de sucesso
+# 8) Criar DataFrame com os 100 números validados
+# -----------------------------
+df_validacao = pd.DataFrame({
+    "Telefone_Celular": numeros_validar.values,
+    "CNAM_Info": resultados
+})
+
+# -----------------------------
+# 9) Exportar dados para Excel
+# -----------------------------
+# a) Todos os dados
+caminho_excel = os.path.join(pasta_destino, "dados_clientes.xlsx")
+df.to_excel(caminho_excel, index=False)
+
+# b) Apenas os 100 validados
+caminho_validacao = os.path.join(pasta_destino, "validacao_cnam.xlsx")
+df_validacao.to_excel(caminho_validacao, index=False)
+
+# -----------------------------
+# 10) Mensagem final
 # -----------------------------
 print("✅ Dados exportados com sucesso!")
+print(f"📂 Arquivos salvos em: {pasta_destino}")
 
 # -----------------------------
-# 8) Fechar a conexão
+# 11) Fechar conexão
 # -----------------------------
 conn.close()
-# Sempre feche a conexão para liberar recursos do SQL Server
