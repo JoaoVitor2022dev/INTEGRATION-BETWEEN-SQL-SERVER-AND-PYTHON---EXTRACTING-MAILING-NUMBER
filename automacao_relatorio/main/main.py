@@ -1,10 +1,10 @@
 # ====================================================
-# Exportar dados do SQL Server para Excel + Validação CNAM
+# Exportar dados do SQL Server para Excel + Validação WhatsApp (API Meta)
 # Autor: João Mocambite
 # Objetivo: 
 #   1) Conectar ao banco SQL Server e buscar dados de clientes
 #   2) Exportar todos os registros para Excel
-#   3) Validar até 100 números de telefone usando a API freecnam.org
+#   3) Validar até 100 números de telefone usando a API oficial da Meta (WhatsApp Cloud API)
 #   4) Exportar os resultados da validação para outra planilha Excel
 # ====================================================
 
@@ -13,7 +13,7 @@ import pyodbc          # Conexão com SQL Server
 import pandas as pd    # Manipulação de dados (DataFrame)
 from dotenv import load_dotenv  # Carregar variáveis de ambiente (.env)
 import os              # Manipular pastas e caminhos
-import requests        # Fazer requisições HTTP (chamada na API freecnam)
+import requests        # Fazer requisições HTTP (chamada na API Meta)
 import time            # Usado para dar pausas entre chamadas da API
 
 # -----------------------------
@@ -21,8 +21,10 @@ import time            # Usado para dar pausas entre chamadas da API
 # -----------------------------
 # O arquivo .env guarda informações sensíveis (como servidor e banco de dados)
 load_dotenv()
-server = os.getenv("DB_SERVER")      # Nome do servidor SQL
-database = os.getenv("DB_DATABASE")  # Nome do banco de dados
+server = os.getenv("DB_SERVER")        # Nome do servidor SQL
+database = os.getenv("DB_DATABASE")    # Nome do banco de dados
+access_token = os.getenv("META_TOKEN") # Token de acesso da API Meta
+phone_number_id = os.getenv("META_PHONE_ID")  # ID do número do WhatsApp Business
 
 # -----------------------------
 # 2) Definir pasta onde os relatórios serão salvos
@@ -62,29 +64,47 @@ df = df[df["Telefone_Celular"].notna()]  # remove valores nulos
 df = df[df["Telefone_Celular"].astype(str).str.strip() != ""]  # remove strings vazias
 
 # -----------------------------
-# 7) Validar até 100 números de telefone com a API freecnam.org
+# 7) Validar até 100 números de telefone com a API Meta (WhatsApp Cloud API)
 # -----------------------------
+# Endpoint oficial da Meta: POST /{Phone-Number-ID}/contacts
+# Doc: https://developers.facebook.com/docs/whatsapp/cloud-api/reference/contacts
+# Obs: Necessário token válido e ID do número configurados no .env
 resultados = []
 numeros_validar = df["Telefone_Celular"].head(100)  # pega só os 100 primeiros números
 
+url = f"https://graph.facebook.com/v20.0/{phone_number_id}/contacts"
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json"
+}
+
 for numero in numeros_validar:
     try:
-        url = f"https://freecnam.org/dip?q={numero}"
-        r = requests.get(url, timeout=5)  # timeout=5 segundos para não travar
+        payload = {
+            "blocking": "wait",
+            "contacts": [str(numero)],
+            "force_check": True
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
         if r.status_code == 200:
-            resultados.append(r.text.strip())  # resposta da API
+            data = r.json()
+            # Se o número é válido no WhatsApp
+            if "contacts" in data and data["contacts"]:
+                resultados.append(data["contacts"][0].get("status", "desconhecido"))
+            else:
+                resultados.append("não encontrado")
         else:
-            resultados.append("Erro API")      # caso a API não responda corretamente
-    except:
-        resultados.append("Erro conexão")      # erro de internet ou outro
-    time.sleep(1)  # pausa de 1s para não sobrecarregar a API gratuita
+            resultados.append(f"Erro API ({r.status_code})")
+    except Exception as e:
+        resultados.append("Erro conexão")
+    time.sleep(1)  # pausa de 1s para não sobrecarregar a API
 
 # -----------------------------
 # 8) Criar DataFrame com os 100 números validados
 # -----------------------------
 df_validacao = pd.DataFrame({
     "Telefone_Celular": numeros_validar.values,
-    "CNAM_Info": resultados
+    "WhatsApp_Status": resultados
 })
 
 # -----------------------------
@@ -95,7 +115,7 @@ caminho_excel = os.path.join(pasta_destino, "dados_clientes.xlsx")
 df.to_excel(caminho_excel, index=False)
 
 # b) Apenas os 100 validados
-caminho_validacao = os.path.join(pasta_destino, "validacao_cnam.xlsx")
+caminho_validacao = os.path.join(pasta_destino, "validacao_whatsapp.xlsx")
 df_validacao.to_excel(caminho_validacao, index=False)
 
 # -----------------------------
